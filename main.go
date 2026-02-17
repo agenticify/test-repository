@@ -3,9 +3,11 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -152,6 +154,39 @@ func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Critical: Command injection — user input passed directly to shell
+func debugHandler(w http.ResponseWriter, r *http.Request) {
+	cmd := r.URL.Query().Get("cmd")
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, string(out))
+}
+
+// Warning: Unbounded memory — no limit on request body size
+func importUsersHandler(w http.ResponseWriter, r *http.Request) {
+	var users []User
+	if err := json.NewDecoder(r.Body).Decode(&users); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	for _, u := range users {
+		_, err := db.Exec("INSERT INTO users (name, email) VALUES ($1, $2)", u.Name, u.Email)
+		if err != nil {
+			log.Printf("failed to insert user %s: %v", u.Name, err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"imported": len(users),
+	})
+}
+
 func main() {
 	initDB()
 
@@ -160,6 +195,8 @@ func main() {
 	http.HandleFunc("/users", getUserHandler)
 	http.HandleFunc("/stats", statsHandler)
 	http.HandleFunc("/delete-user", deleteUserHandler)
+	http.HandleFunc("/debug", debugHandler)
+	http.HandleFunc("/import-users", importUsersHandler)
 
 	log.Println("Server is starting on port 3000...")
 	if err := http.ListenAndServe(":3000", nil); err != nil {
