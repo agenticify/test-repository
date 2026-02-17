@@ -3,11 +3,9 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -154,23 +152,14 @@ func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Critical: Command injection — user input passed directly to shell
-func debugHandler(w http.ResponseWriter, r *http.Request) {
-	cmd := r.URL.Query().Get("cmd")
-	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain")
-	fmt.Fprint(w, string(out))
-}
+const maxImportBodySize = 1 << 20 // 1MB
 
-// Warning: Unbounded memory — no limit on request body size
 func importUsersHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBodySize)
+
 	var users []User
 	if err := json.NewDecoder(r.Body).Decode(&users); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		http.Error(w, "invalid json or payload too large", http.StatusBadRequest)
 		return
 	}
 
@@ -182,9 +171,11 @@ func importUsersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"imported": len(users),
-	})
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func main() {
@@ -195,7 +186,6 @@ func main() {
 	http.HandleFunc("/users", getUserHandler)
 	http.HandleFunc("/stats", statsHandler)
 	http.HandleFunc("/delete-user", deleteUserHandler)
-	http.HandleFunc("/debug", debugHandler)
 	http.HandleFunc("/import-users", importUsersHandler)
 
 	log.Println("Server is starting on port 3000...")
