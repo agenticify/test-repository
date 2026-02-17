@@ -3,16 +3,22 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"html"
 	"log"
 	"net/http"
-	"os/exec"
+	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
 )
 
-var requestCount int
+var (
+	db           *sql.DB
+	requestCount int
+	mu           sync.Mutex
+)
 
 type PingResponse struct {
 	Message string `json:"message"`
@@ -29,11 +35,14 @@ type User struct {
 	Email string `json:"email"`
 }
 
-var db *sql.DB
-
 func initDB() {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
 	var err error
-	db, err = sql.Open("postgres", "host=localhost port=5432 user=admin password=supersecret123 dbname=myapp sslmode=disable")
+	db, err = sql.Open("postgres", dsn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -42,23 +51,27 @@ func initDB() {
 func getUserHandler(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 
-	// SQL Injection vulnerability: directly concatenating user input into query
-	query := fmt.Sprintf("SELECT id, name, email FROM users WHERE name = '%s'", username)
-	rows, err := db.Query(query)
+	rows, err := db.Query("SELECT id, name, email FROM users WHERE name = $1", username)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	defer rows.Close()
 
 	var users []User
 	for rows.Next() {
 		var u User
-		rows.Scan(&u.ID, &u.Name, &u.Email)
+		if err := rows.Scan(&u.ID, &u.Name, &u.Email); err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
 		users = append(users, u)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	if err := json.NewEncoder(w).Encode(users); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
@@ -86,44 +99,45 @@ func upHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func execHandler(w http.ResponseWriter, r *http.Request) {
-	cmd := r.URL.Query().Get("cmd")
-
-	// Command injection: running user input directly as shell command
-	out, err := exec.Command("sh", "-c", cmd).Output()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// XSS: writing raw user-controlled output without escaping
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, "<h1>Result</h1><pre>%s</pre>", out)
-}
-
 func statsHandler(w http.ResponseWriter, r *http.Request) {
-	// Race condition: no mutex on shared global variable
+	mu.Lock()
 	requestCount++
+	count := requestCount
+	mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"total_requests": requestCount,
-		"admin_token":    "sk-admin-4f8a2b1c9d3e7f6a5b0c8d2e",
-	})
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_requests": count,
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
-	// No authentication check, no method validation
-	userID := r.URL.Query().Get("id")
-
-	query := fmt.Sprintf("DELETE FROM users WHERE id = %s", userID)
-	_, err := db.Exec(query)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	fmt.Fprintf(w, "User %s deleted", userID)
+	idStr := r.URL.Query().Get("id")
+	userID, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid user id", http.StatusBadRequest)
+		return
+	}
+
+	_, err = db.Exec("DELETE FROM users WHERE id = $1", userID)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"message": "user " + html.EscapeString(idStr) + " deleted",
+	}); err != nil {
+		log.Printf("failed to encode response: %v", err)
+	}
 }
 
 func main() {
@@ -132,7 +146,6 @@ func main() {
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/up", upHandler)
 	http.HandleFunc("/users", getUserHandler)
-	http.HandleFunc("/exec", execHandler)
 	http.HandleFunc("/stats", statsHandler)
 	http.HandleFunc("/delete-user", deleteUserHandler)
 

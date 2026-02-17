@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -56,5 +57,60 @@ func TestUpHandler(t *testing.T) {
 
 	if resp.Timestamp <= 0 {
 		t.Errorf("expected positive timestamp, got %d", resp.Timestamp)
+	}
+}
+
+func TestStatsHandler_Concurrent(t *testing.T) {
+	// Reset counter
+	mu.Lock()
+	requestCount = 0
+	mu.Unlock()
+
+	var wg sync.WaitGroup
+	n := 100
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/stats", nil)
+			rec := httptest.NewRecorder()
+			statsHandler(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("expected status %d, got %d", http.StatusOK, rec.Code)
+			}
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	count := requestCount
+	mu.Unlock()
+
+	if count != n {
+		t.Errorf("expected request count %d, got %d", n, count)
+	}
+}
+
+func TestDeleteUserHandler_MethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/delete-user?id=1", nil)
+	rec := httptest.NewRecorder()
+
+	deleteUserHandler(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, rec.Code)
+	}
+}
+
+func TestDeleteUserHandler_InvalidID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodDelete, "/delete-user?id=abc", nil)
+	rec := httptest.NewRecorder()
+
+	deleteUserHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
