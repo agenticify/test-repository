@@ -62,9 +62,7 @@ func TestUpHandler(t *testing.T) {
 
 func TestStatsHandler_Concurrent(t *testing.T) {
 	// Reset counter
-	mu.Lock()
-	requestCount = 0
-	mu.Unlock()
+	requestCount.Store(0)
 
 	var wg sync.WaitGroup
 	n := 100
@@ -84,11 +82,8 @@ func TestStatsHandler_Concurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	mu.Lock()
-	count := requestCount
-	mu.Unlock()
-
-	if count != n {
+	count := requestCount.Load()
+	if count != int64(n) {
 		t.Errorf("expected request count %d, got %d", n, count)
 	}
 }

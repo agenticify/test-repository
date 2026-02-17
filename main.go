@@ -3,12 +3,11 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"html"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -16,8 +15,7 @@ import (
 
 var (
 	db           *sql.DB
-	requestCount int
-	mu           sync.Mutex
+	requestCount atomic.Int64
 )
 
 type PingResponse struct {
@@ -100,10 +98,7 @@ func upHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func statsHandler(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	requestCount++
-	count := requestCount
-	mu.Unlock()
+	count := requestCount.Add(1)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -126,15 +121,28 @@ func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.Exec("DELETE FROM users WHERE id = $1", userID)
+	result, err := db.Exec("DELETE FROM users WHERE id = $1", userID)
 	if err != nil {
+		log.Printf("failed to delete user %d: %v", userID, err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("failed to get rows affected: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{
-		"message": "user " + html.EscapeString(idStr) + " deleted",
+		"message": "user deleted",
 	}); err != nil {
 		log.Printf("failed to encode response: %v", err)
 	}
