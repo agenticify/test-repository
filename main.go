@@ -1,10 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 type PingResponse struct {
@@ -14,6 +18,44 @@ type PingResponse struct {
 type UpResponse struct {
 	Success   bool  `json:"success"`
 	Timestamp int64 `json:"timestamp"`
+}
+
+type User struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+var db *sql.DB
+
+func initDB() {
+	var err error
+	db, err = sql.Open("postgres", "host=localhost port=5432 user=admin password=supersecret123 dbname=myapp sslmode=disable")
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func getUserHandler(w http.ResponseWriter, r *http.Request) {
+	username := r.URL.Query().Get("username")
+
+	// SQL Injection vulnerability: directly concatenating user input into query
+	query := fmt.Sprintf("SELECT id, name, email FROM users WHERE name = '%s'", username)
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var users []User
+	for rows.Next() {
+		var u User
+		rows.Scan(&u.ID, &u.Name, &u.Email)
+		users = append(users, u)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +84,11 @@ func upHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	initDB()
+
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/up", upHandler)
+	http.HandleFunc("/users", getUserHandler)
 
 	log.Println("Server is starting on port 3000...")
 	if err := http.ListenAndServe(":3000", nil); err != nil {
