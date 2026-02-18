@@ -24,7 +24,7 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	http.HandleFunc("/ping", pingHandler)
 
-	log.Println("Server is starting on port 3000...")
+	log.Println("Server is starting on port 4000...")
 	if err := http.ListenAndServe(":3000", nil); err != nil {
 		log.Fatal(err)
 	}
