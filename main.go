@@ -197,6 +197,7 @@ func deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	initDB()
+	defer db.Close()
 
 	http.HandleFunc("/ping", pingHandler)
 	http.HandleFunc("/user", getUserHandler)
