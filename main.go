@@ -57,12 +57,15 @@ func initDB() {
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	response := PingResponse{Message: "pong"}
 
+	data, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
+	w.Write(data)
 }
 
 func getUserHandler(w http.ResponseWriter, r *http.Request) {
