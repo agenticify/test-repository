@@ -51,6 +51,10 @@ func initDB() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	if err = db.Ping(); err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
