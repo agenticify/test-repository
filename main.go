@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -30,8 +31,6 @@ type userInternal struct {
 	Username     string
 	PasswordHash string
 	Email        string
-	SSN          string
-	Token        string
 }
 
 type PingResponse struct {
@@ -159,6 +158,10 @@ func createUserHandler(w http.ResponseWriter, r *http.Request) {
 		req.Username, string(hashedPassword), req.Email,
 	).Scan(&userID)
 	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			http.Error(w, "username or email already exists", http.StatusConflict)
+			return
+		}
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
