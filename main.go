@@ -32,8 +32,7 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	var meta map[string]string
-	// Critical Error: Assignment to entry in nil map will cause a panic
+	meta := make(map[string]string)
 	meta["version"] = "v1"
 
 	response := HealthResponse{Success: true, Timestamp: time.Now().Unix()}
