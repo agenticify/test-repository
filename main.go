@@ -1,31 +1,69 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"runtime/debug"
+
+	"github.com/justinas/alice"
+	"test-repository/internal/handlers"
 )
 
-type PingResponse struct {
-	Message string `json:"message"`
-}
+func main() {
+	// Initialize logger
+	logger := log.New(os.Stdout, "http: ", log.LstdFlags)
 
-func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := PingResponse{Message: "pong"}
+	// Read port from environment variable, default to 3000
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	// Create a new ServeMux
+	mux := http.NewServeMux()
 
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Initialize handlers
+	h := handlers.NewHandlers(logger)
+
+	// Apply middleware chain
+	chain := alice.New(loggingMiddleware(logger), recoveryMiddleware(logger))
+
+	// Register handlers with the middleware chain
+	mux.Handle("/ping", chain.ThenFunc(h.PingHandler))
+	mux.Handle("/health", chain.ThenFunc(h.HealthHandler))
+
+	// Start the server
+	serverAddr := fmt.Sprintf(":%s", port)
+	logger.Printf("Server is starting on port %s...", port)
+	if err := http.ListenAndServe(serverAddr, mux); err != nil {
+		logger.Fatalf("Server failed to start: %v", err)
 	}
 }
 
-func main() {
-	http.HandleFunc("/ping", pingHandler)
+// loggingMiddleware logs details of incoming requests.
+func loggingMiddleware(logger *log.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logger.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
-	log.Println("Server is starting on port 3000...")
-	if err := http.ListenAndServe(":3000", nil); err != nil {
-		log.Fatal(err)
+// recoveryMiddleware recovers from panics and logs the error.
+func recoveryMiddleware(logger *log.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if err := recover(); err != nil {
+					http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+					logger.Printf("Panic: %v
+%s", err, debug.Stack())
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
 	}
 }
