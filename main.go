@@ -1,31 +1,31 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+
+	"github.com/your-username/your-project-name/internal/handlers"
+	"github.com/your-username/your-project-name/internal/middleware"
 )
 
-type PingResponse struct {
-	Message string `json:"message"`
-}
-
-func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := PingResponse{Message: "pong"}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
 func main() {
-	http.HandleFunc("/ping", pingHandler)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000"
+	}
 
-	log.Println("Server is starting on port 3000...")
-	if err := http.ListenAndServe(":3000", nil); err != nil {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/ping", handlers.PingHandler)
+	mux.HandleFunc("/health", handlers.HealthHandler)
+
+	// Apply middleware
+	handler := middleware.Logger(middleware.Recovery(mux))
+
+	log.Printf("Server is starting on port %s...", port)
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", port), handler); err != nil {
 		log.Fatal(err)
 	}
 }
