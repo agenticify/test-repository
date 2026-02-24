@@ -17,7 +17,11 @@ type HealthResponse struct {
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := PingResponse{Message: "pong"}
+	var response *PingResponse
+	// Critical Error: Nil pointer dereference will cause a panic
+	log.Printf("Ping message: %s", response.Message)
+
+	response = &PingResponse{Message: "pong"}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
