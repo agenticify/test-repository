@@ -1,31 +1,59 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+
+	"test-repository/internal/handlers"
+	"test-repository/internal/models"
 )
 
-type PingResponse struct {
-	Message string `json:"message"`
+// Logger middleware logs incoming requests.
+func Logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
 }
 
-func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := PingResponse{Message: "pong"}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+// Recovery middleware recovers from panics and logs the error, returning a 500.
+func Recovery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Printf("Panic recovered: %v", err)
+				handlers.RespondWithError(w, http.StatusInternalServerError, "Internal Server Error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
-	http.HandleFunc("/ping", pingHandler)
+	// Configuration Management: Enable port and environment settings to be read via environment variables.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "3000" // Default port
+	}
 
-	log.Println("Server is starting on port 3000...")
-	if err := http.ListenAndServe(":3000", nil); err != nil {
-		log.Fatal(err)
+	mux := http.NewServeMux()
+
+	// Register handlers from the internal/handlers package
+	mux.HandleFunc("/ping", handlers.PingHandler)
+	mux.HandleFunc("/health", handlers.HealthHandler)
+
+	// Set a custom NotFoundHandler for the mux
+	mux.HandleFunc("/", handlers.NotFoundHandler)
+
+	// Apply middleware
+	var handler http.Handler = mux
+	handler = Logger(handler)
+	handler = Recovery(handler)
+
+	log.Printf("Server is starting on port %s...", port)
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
 	}
 }
