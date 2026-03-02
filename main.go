@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/http/httptest"
+	"testing"
 )
 
 type PingResponse struct {
@@ -21,10 +23,26 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func main() {
+func TestHealthHandler(t *testing.T) {
+	req, err := http.NewRequest("GET", "/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	healthHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status OK; got %v", rec.Code)
+	}
+	if rec.Body.String() != "OK" {
+		t.Errorf("expected body 'OK'; got %v", rec.Body.String())
+	}
+}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
 	http.HandleFunc("/ping", pingHandler)
+	http.HandleFunc("/health", healthHandler)
 
-	log.Println("Server is starting on port 3000...")
 	if err := http.ListenAndServe(":3000", nil); err != nil {
 		log.Fatal(err)
 	}
